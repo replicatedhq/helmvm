@@ -10,6 +10,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -117,19 +118,35 @@ func (k *KubeUtils) WaitForJob(ctx context.Context, cli client.Client, ns, name 
 	var lasterr error
 	if err := wait.ExponentialBackoffWithContext(
 		ctx, backoff, func(ctx context.Context) (bool, error) {
+			failed, err := k.IsJobFailed(ctx, cli, ns, name)
+			if k8serrors.IsNotFound(err) {
+				// exit
+				lasterr = fmt.Errorf("job not found")
+				return false, lasterr
+			} else if err != nil {
+				lasterr = fmt.Errorf("unable to get job status: %w", err)
+				return false, nil
+			} else if failed {
+				// exit
+				lasterr = fmt.Errorf("job failed")
+				return false, lasterr
+			}
 			ready, err := k.IsJobComplete(ctx, cli, ns, name, completions)
 			if err != nil {
 				lasterr = fmt.Errorf("unable to get job status: %w", err)
 				return false, nil
+			} else if ready {
+				return true, nil
 			}
-			return ready, nil
+			// TODO: need to handle the case where the pod get stuck in pending
+			// This can happen if nodes are not schedulable or if a volume is not found
+			return false, nil
 		},
 	); err != nil {
 		if lasterr != nil {
-			return fmt.Errorf("timed out waiting for job %s: %w", name, lasterr)
-		} else {
-			return fmt.Errorf("timed out waiting for job %s", name)
+			return lasterr
 		}
+		return fmt.Errorf("timed out waiting for job %s", name)
 	}
 	return nil
 }
@@ -283,6 +300,24 @@ func (k *KubeUtils) IsJobComplete(ctx context.Context, cli client.Client, ns, na
 		return false, err
 	}
 	if job.Status.Succeeded >= completions {
+		return true, nil
+	}
+	return false, nil
+}
+
+// IsJobFailed if the job has exceeded the backoff limit.
+func (k *KubeUtils) IsJobFailed(ctx context.Context, cli client.Client, ns, name string) (bool, error) {
+	var job batchv1.Job
+	nsn := types.NamespacedName{Namespace: ns, Name: name}
+	if err := cli.Get(ctx, nsn, &job); err != nil {
+		return false, err
+	}
+	backoffLimit := int32(6) // default
+	if job.Spec.BackoffLimit != nil {
+		backoffLimit = *job.Spec.BackoffLimit
+	}
+	exceedsBackoffLimit := job.Status.Failed > backoffLimit
+	if exceedsBackoffLimit {
 		return true, nil
 	}
 	return false, nil
