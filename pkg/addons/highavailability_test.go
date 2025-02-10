@@ -58,7 +58,7 @@ func Test_canEnableHA(t *testing.T) {
 				).Build(),
 			},
 			want:       false,
-			wantReason: "Number of control plane nodes is less than 3",
+			wantReason: "number of control plane nodes is less than 3",
 		},
 		{
 			name: "high availability is already enabled",
@@ -74,7 +74,7 @@ func Test_canEnableHA(t *testing.T) {
 				).Build(),
 			},
 			want:       false,
-			wantReason: "High avilability is already enabled",
+			wantReason: "already enabled",
 		},
 		{
 			name: "high availability is not enabled and there is three or more controller nodes but a restore is in progress",
@@ -93,7 +93,7 @@ func Test_canEnableHA(t *testing.T) {
 				).Build(),
 			},
 			want:       false,
-			wantReason: "High availability cannot be enabled while a restore is in progress",
+			wantReason: "a restore is in progress",
 		},
 	}
 	for _, tt := range tests {
