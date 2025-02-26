@@ -93,7 +93,7 @@ func PatchK0sConfig(config *k0sconfig.ClusterConfig, patch string) (*k0sconfig.C
 }
 
 // InstallFlags returns a list of default flags to be used when bootstrapping a k0s cluster.
-func InstallFlags(nodeIP string) []string {
+func InstallFlags(nodeIP string) ([]string, error) {
 	flags := []string{
 		"install",
 		"controller",
@@ -104,7 +104,12 @@ func InstallFlags(nodeIP string) []string {
 	}
 	flags = append(flags, AdditionalInstallFlags(nodeIP)...)
 	flags = append(flags, AdditionalInstallFlagsController()...)
-	return flags
+	profile, err := ProfileInstallFlag()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get profile install flag: %w", err)
+	}
+	flags = append(flags, profile)
+	return flags, nil
 }
 
 func AdditionalInstallFlags(nodeIP string) []string {
@@ -121,6 +126,24 @@ func AdditionalInstallFlagsController() []string {
 		"--disable-components", "konnectivity-server",
 		"--enable-dynamic-config",
 	}
+}
+
+func ProfileInstallFlag() (string, error) {
+	cfg, err := release.GetEmbeddedClusterConfig()
+	if err != nil {
+		return "", err
+	}
+
+	k0sconfig := k0sconfig.ClusterConfig{}
+	if err := k8syaml.Unmarshal([]byte(cfg.Spec.UnsupportedOverrides.K0s), &k0sconfig); err != nil {
+		return "", fmt.Errorf("unable to unmarshal k0s config: %w", err)
+	}
+
+	profiles := k0sconfig.Spec.WorkerProfiles
+	if len(profiles) > 0 {
+		return "--profile=" + profiles[len(profiles)-1].Name, nil
+	}
+	return "", nil
 }
 
 // nodeLabels return a slice of string with labels (key=value format) for the node where we
